@@ -6,9 +6,11 @@
  * 2. 'routing': India-wide AI Route Optimization using Directions Service and Autocomplete.
  */
 
-import { useEffect, useRef, useState, useCallback, memo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import api from '../../services/api';
 import { getGeoDistance, distanceToSegmentGeo } from '../../utils/geo';
+
+const Fragment = React.Fragment;
 
 // Custom dark map style for Google Maps to match cyberpunk aesthetics
 const darkMapStyle = [
@@ -931,7 +933,7 @@ function CityMap({
           </div>
           <div className="glass-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
             {clickedEntity.type === 'node' ? (
-              <>
+              <Fragment>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>Zone:</span>
                   <strong style={{ color: 'var(--accent-violet)' }}>{clickedEntity.properties.zone}</strong>
@@ -953,9 +955,9 @@ function CityMap({
                   <span style={{ color: 'var(--text-secondary)' }}>Noise Level:</span>
                   <strong style={{ color: 'var(--accent-fuchsia)' }}>{clickedEntity.properties.noise?.toFixed(1) || 0} dB</strong>
                 </div>
-              </>
+              </Fragment>
             ) : (
-              <>
+              <Fragment>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>From → To:</span>
                   <strong>{clickedEntity.properties.from} → {clickedEntity.properties.to}</strong>
@@ -1008,7 +1010,7 @@ function CityMap({
                 >
                   {clickedEntity.properties.is_closed ? '🔓 Reopen Road' : '🚧 Close Road'}
                 </button>
-              </>
+              </Fragment>
             )}
           </div>
         </div>
