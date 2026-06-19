@@ -61,6 +61,14 @@ export default function setupMockGoogleMaps() {
     setMap() {}
   }
 
+  class Geocoder {
+    geocode(request, callback) {
+      // Provide a simple reverse geocode response with a formatted_address
+      const res = [{ formatted_address: 'Mock Address, Test City' }];
+      callback(res, 'OK');
+    }
+  }
+
   window.google.maps.Map = MockMap;
   window.google.maps.LatLng = LatLng;
   window.google.maps.OverlayView = OverlayView;
