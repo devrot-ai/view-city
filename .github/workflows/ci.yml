@@ -89,6 +89,22 @@ jobs:
         with:
           node-version: 18
 
+      - name: Set up Python for backend
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Install backend dependencies (for e2e)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Start backend (background)
+        run: |
+          cd backend
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+        continue-on-error: true
+
       - name: Install frontend deps
         run: |
           cd frontend
