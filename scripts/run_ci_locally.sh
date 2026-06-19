@@ -5,6 +5,10 @@ echo "Running local CI steps: backend tests + frontend lint"
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
 # Backend
 python -m venv .venv
 source .venv/bin/activate
@@ -19,7 +23,7 @@ deactivate || true
 
 # Frontend
 cd frontend
-npm ci
+npm install --legacy-peer-deps
 npm run lint
 
 echo "Local CI completed successfully"

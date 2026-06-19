@@ -3,6 +3,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Write-Output "Running local CI steps: backend tests + frontend lint"
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $repoRoot
+
 # Backend
 python -m venv .venv
 . .venv\Scripts\Activate.ps1
@@ -21,7 +24,7 @@ pytest -q backend/tests
 
 # Frontend
 Push-Location frontend
-npm ci
+npm install --legacy-peer-deps
 npm run lint
 Pop-Location
 
