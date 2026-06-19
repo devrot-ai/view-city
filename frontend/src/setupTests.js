@@ -1,4 +1,11 @@
-import '@testing-library/jest-dom';
+import { expect } from 'vitest';
+
+// Make Vitest's `expect` global so jest-dom can extend it safely
+globalThis.expect = expect;
+
+// Dynamically import jest-dom so this module can set `expect` first
+await import('@testing-library/jest-dom');
+
 import setupMockGoogleMaps from './test-utils/mockGoogleMaps';
 
 // Install a lightweight mock of the Google Maps API for headless tests
