@@ -34,6 +34,7 @@
   },
   "vitest": {
     "environment": "jsdom",
-    "setupFiles": "./src/setupTests.js"
+    "setupFiles": "./src/setupTests.js",
+    "exclude": ["e2e/**"]
   }
 }
