@@ -6,6 +6,7 @@ values from the in-memory CityGraph — no DB queries needed.
 """
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from app.models.schemas import (
     PolicyApplyRequest,
@@ -37,6 +38,43 @@ def create_routes(engine, policy_engine, advisor):
     async def get_metrics():
         """Get current aggregate metrics snapshot."""
         return engine.get_metrics()
+
+    @router.get("/metrics/prometheus")
+    async def get_metrics_prometheus():
+        """Expose lightweight Prometheus-format metrics for scraping.
+
+        This returns a plain-text exposition derived from the engine's
+        metrics snapshot. It is intentionally minimal to avoid adding
+        runtime dependencies on prometheus_client in test/dev.
+        """
+        metrics = engine.get_metrics()
+        lines = []
+        # Basic simulation counters/gauges
+        lines.append('# HELP city_tick Current simulation tick')
+        lines.append('# TYPE city_tick counter')
+        lines.append(f'city_tick {metrics.get("tick", 0)}')
+
+        lines.append('# HELP city_active_vehicles Number of active vehicles')
+        lines.append('# TYPE city_active_vehicles gauge')
+        lines.append(f'city_active_vehicles {metrics.get("total_vehicles", 0)}')
+
+        lines.append('# HELP city_sim_time Simulation time in seconds')
+        lines.append('# TYPE city_sim_time gauge')
+        lines.append(f'city_sim_time {metrics.get("sim_time", 0.0)}')
+
+        # Optional indices
+        if "pollution_index" in metrics:
+            lines.append('# HELP city_pollution_air_index Aggregate pollution index')
+            lines.append('# TYPE city_pollution_air_index gauge')
+            lines.append(f'city_pollution_air_index {metrics.get("pollution_index", 0.0)}')
+
+        if "noise_index" in metrics:
+            lines.append('# HELP city_noise_index Aggregate noise index')
+            lines.append('# TYPE city_noise_index gauge')
+            lines.append(f'city_noise_index {metrics.get("noise_index", 0.0)}')
+
+        body = "\n".join(lines) + "\n"
+        return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @router.get("/health")
     async def health():

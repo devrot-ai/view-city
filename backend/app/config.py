@@ -1,6 +1,10 @@
 from typing import List
 
-from pydantic import BaseSettings
+try:
+    from pydantic import BaseSettings
+except Exception:
+    # pydantic 2.10+ moved BaseSettings to pydantic-settings package
+    from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
