@@ -5,7 +5,7 @@
  * of alternative routes with AI scoring, traffic warnings, and navigation steps.
  */
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react'; // eslint-disable-line no-unused-vars
 import GlassCard from '../UI/GlassCard';
 
 export default function RouteOptimizerPanel({
