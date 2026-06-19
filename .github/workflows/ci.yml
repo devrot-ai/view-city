@@ -71,6 +71,44 @@ jobs:
           cd frontend
           npm run lint
 
+  e2e-tests:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    services:
+      frontend:
+        image: node:18
+        options: --workdir /github/workspace/frontend
+        ports:
+          - 5173:5173
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install frontend deps
+        run: |
+          cd frontend
+          npm ci --legacy-peer-deps
+
+      - name: Start frontend (background)
+        run: |
+          cd frontend
+          npm run dev &
+        continue-on-error: true
+
+      - name: Wait for frontend
+        run: |
+          npx wait-on http://localhost:5173/ || sleep 1
+
+      - name: Run Playwright E2E
+        uses: microsoft/playwright-github-action@v1
+        with:
+          run: npx playwright test --config=frontend/playwright.config.ts
+
   publish-images:
     needs: build-and-test
     runs-on: ubuntu-latest
