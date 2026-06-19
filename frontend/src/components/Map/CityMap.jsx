@@ -6,7 +6,7 @@
  * 2. 'routing': India-wide AI Route Optimization using Directions Service and Autocomplete.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
 import api from '../../services/api';
 
 // Custom dark map style for Google Maps to match cyberpunk aesthetics
@@ -167,6 +167,7 @@ function CityMap({
       .catch((e) => {
         console.error('Failed to load Google Maps API:', e);
       });
+     
   }, []);
 
   // Auto-dismiss Google Maps warning dialog for developer/local fallback mode
@@ -178,6 +179,8 @@ function CityMap({
       }
     }, 1000);
     return () => clearInterval(interval);
+    // this is intentionally no deps because it operates on document global
+     
   }, []);
 
 
@@ -1063,12 +1066,8 @@ function CityMap({
     </div>
   );
 
-  function handleClosePopup() {
-    setClickedEntity(null);
-  }
 }
-
-export default React.memo(CityMap, (prevProps, nextProps) => {
+export default memo(CityMap, (prevProps, nextProps) => {
   // If mode changed, we MUST re-render
   if (prevProps.mode !== nextProps.mode) return false;
 
