@@ -3,11 +3,16 @@ set -euo pipefail
 
 echo "Running local CI steps: backend tests + frontend lint"
 
+set -euo pipefail
+
 # Backend
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
+
+# Ensure tests can import the backend package
+export PYTHONPATH=${PYTHONPATH:-}:"$(pwd)/backend"
 pytest -q backend/tests
 
 deactivate || true
