@@ -5,7 +5,7 @@
  * of alternative routes with AI scoring, traffic warnings, and navigation steps.
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import GlassCard from '../UI/GlassCard';
 
 export default function RouteOptimizerPanel({

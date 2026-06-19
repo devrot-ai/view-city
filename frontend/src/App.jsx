@@ -5,7 +5,7 @@
  * policy selector, and AI recommendations panel.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import './styles/index.css';
 
 import CityMap from './components/Map/CityMap';
@@ -38,8 +38,8 @@ export default function App() {
   const [recommendations, setRecommendations] = useState([]);
   const [autopilot, setAutopilot] = useState(false);
 
-  // Zones list
-  const [zones, setZones] = useState([]);
+  // Zones list (derived from simulation state)
+  const zones = useMemo(() => sim.cityData?.zones || [], [sim.cityData?.zones]);
 
   // Active policies
   const [activePolicies, setActivePolicies] = useState({});
@@ -65,12 +65,7 @@ export default function App() {
     setSelectedRouteIndex(0);
   }, []);
 
-  // Extract zones from city data
-  useEffect(() => {
-    if (sim.cityData?.zones) {
-      setZones(sim.cityData.zones);
-    }
-  }, [sim.cityData]);
+  // zones derived via useMemo above — no setState inside effects
 
   // Fetch recommendations periodically
   useEffect(() => {
@@ -81,8 +76,8 @@ export default function App() {
         const data = await api.getRecommendations();
         setRecommendations(data.recommendations || []);
         setAutopilot(data.autopilot || false);
-      } catch (e) {
-        // Silently handle — non-critical
+      } catch (err) {
+        console.warn('getRecommendations failed:', err);
       }
     }, 5000);
 
@@ -95,8 +90,8 @@ export default function App() {
       try {
         const data = await api.getActivePolicies();
         setActivePolicies(data.active || {});
-      } catch (e) {
-        // Silently handle
+      } catch (err) {
+        console.warn('getActivePolicies failed:', err);
       }
     }, 3000);
 

@@ -6,7 +6,7 @@
  * 2. 'routing': India-wide AI Route Optimization using Directions Service and Autocomplete.
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../services/api';
 
 // Custom dark map style for Google Maps to match cyberpunk aesthetics
@@ -489,6 +489,28 @@ function CityMap({
 
   const handleContainerMouseMove = (e) => {
     setMousePos({ x: e.clientX, y: e.clientY });
+  };
+
+  // Close the floating popup
+  const handleClosePopup = () => {
+    setClickedEntity(null);
+  };
+
+  // Toggle a road closure policy for the given edge id (best-effort)
+  const handleToggleRoadClosure = async (edgeId, currentlyClosed) => {
+    try {
+      if (api && api.applyPolicy) {
+        if (currentlyClosed) {
+          await api.resetPolicies(null, null, [edgeId]);
+        } else {
+          await api.applyPolicy('CLOSE_ROAD', null, {}, [edgeId]);
+        }
+      } else {
+        console.warn('API applyPolicy/resetPolicies unavailable');
+      }
+    } catch (err) {
+      console.warn('toggleRoadClosure failed:', err);
+    }
   };
 
   // 4. Drawing and animation loop (Simulation Mode Only)

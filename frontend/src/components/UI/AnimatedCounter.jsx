@@ -2,7 +2,7 @@
  * AnimatedCounter — Smooth number transition with counting animation.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function AnimatedCounter({
   value,

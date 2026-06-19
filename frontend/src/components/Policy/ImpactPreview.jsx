@@ -2,7 +2,7 @@
  * ImpactPreview — Before/after comparison when a policy is applied.
  */
 
-import React from 'react';
+// No default React import needed for modern JSX runtime
 
 export default function ImpactPreview({ impact }) {
   if (!impact?.changes) return null;

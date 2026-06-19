@@ -2,7 +2,7 @@
  * GlassCard — Reusable glassmorphism card component.
  */
 
-import React from 'react';
+// No default React import required for JSX automatic runtime
 
 export default function GlassCard({ title, icon, children, className = '' }) {
   return (
