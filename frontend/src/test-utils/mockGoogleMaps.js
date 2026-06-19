@@ -69,6 +69,34 @@ export default function setupMockGoogleMaps() {
     }
   }
 
+  // Minimal Places Autocomplete mock
+  window.__mockAutocompleteInstances = window.__mockAutocompleteInstances || [];
+  class Autocomplete {
+    constructor(el, opts) {
+      this._el = el;
+      this._opts = opts;
+      this._listeners = {};
+      this._place = null;
+      window.__mockAutocompleteInstances.push(this);
+    }
+    addListener(event, cb) {
+      this._listeners[event] = this._listeners[event] || [];
+      this._listeners[event].push(cb);
+      return { remove: () => {} };
+    }
+    getPlace() {
+      return this._place || {};
+    }
+    // Helper for tests to set the place and trigger listeners
+    triggerPlaceChanged(place) {
+      if (place) this._place = place;
+      (this._listeners['place_changed'] || []).forEach((fn) => fn());
+    }
+  }
+
+  window.google.maps.places = window.google.maps.places || {};
+  window.google.maps.places.Autocomplete = Autocomplete;
+
   window.google.maps.Map = MockMap;
   window.google.maps.LatLng = LatLng;
   window.google.maps.OverlayView = OverlayView;
