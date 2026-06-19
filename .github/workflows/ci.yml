@@ -33,6 +33,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Install backend package (editable)
+        run: |
+          python -m pip install -e backend
+
       - name: Run backend tests
         run: |
           pytest -q backend/tests
