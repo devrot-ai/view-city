@@ -83,6 +83,38 @@ export default function RouteOptimizerPanel({
     onClear?.();
   };
 
+  // Handle GPS Current Location retrieval
+  const handleUseGPS = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const latLng = new window.google.maps.LatLng(latitude, longitude);
+
+        // Reverse Geocode the location to get a readable address
+        const geocoder = new window.google.maps.Geocoder();
+        geocoder.geocode({ location: latLng }, (results, status) => {
+          if (status === 'OK' && results[0]) {
+            const address = results[0].formatted_address;
+            onOriginSelected(address, latLng);
+          } else {
+            // Fallback description if geocoding fails
+            onOriginSelected(`My Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`, latLng);
+          }
+        });
+      },
+      (error) => {
+        console.warn('Geolocation error:', error);
+        alert(`Failed to retrieve your location: ${error.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  };
+
   // Helper to calculate AI Routing Score and Details
   const processedRoutes = useMemo(() => {
     return routes.map((route, idx) => {
@@ -160,14 +192,39 @@ export default function RouteOptimizerPanel({
             <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: '4px', textTransform: 'uppercase' }}>
               📍 Start Position
             </label>
-            <input
-              ref={originInputRef}
-              type="text"
-              placeholder="Search origin in India..."
-              className="zone-select"
-              style={{ margin: 0, textOverflow: 'ellipsis' }}
-              id="origin-search-input"
-            />
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input
+                ref={originInputRef}
+                type="text"
+                placeholder="Search origin in India..."
+                className="zone-select"
+                style={{ margin: 0, flex: 1, textOverflow: 'ellipsis' }}
+                id="origin-search-input"
+              />
+              <button
+                type="button"
+                onClick={handleUseGPS}
+                className="btn-reset"
+                style={{
+                  padding: '0 10px',
+                  margin: 0,
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(6, 182, 212, 0.1)',
+                  border: '1px solid var(--glass-border)',
+                  color: 'var(--accent-cyan)',
+                  borderRadius: 'var(--radius-sm)',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+                title="Use Current Location (GPS)"
+                id="btn-use-gps"
+              >
+                🎯
+              </button>
+            </div>
           </div>
 
           {/* Destination Search */}
