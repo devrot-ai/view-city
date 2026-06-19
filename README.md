@@ -28,7 +28,7 @@ python -m pip install -r backend/requirements.txt
 - `CORS_ORIGINS` — comma-separated origins (e.g. `http://localhost:5173`)
 - `GRID_SIZE` — grid size used to generate the city (default: 8)
 - `DEBUG` — set to `true` or `false`
- - `JSON_LOGGING` — set to `true` to enable JSON structured logs, `false` for plain text
+- `JSON_LOGGING` — set to `true` to enable JSON structured logs, `false` for plain text
 
 4. Run backend dev server:
 

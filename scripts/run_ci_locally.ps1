@@ -10,7 +10,13 @@ python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 
 # Ensure pytest can import the backend package
-$env:PYTHONPATH = (Join-Path (Get-Location) 'backend') + ";" + ($env:PYTHONPATH -ne $null ? $env:PYTHONPATH : "")
+# Prepend project backend directory to PYTHONPATH so tests can import the `app` package
+$existing = $env:PYTHONPATH
+if ([string]::IsNullOrEmpty($existing)) {
+	$env:PYTHONPATH = (Join-Path (Get-Location) 'backend')
+} else {
+	$env:PYTHONPATH = (Join-Path (Get-Location) 'backend') + ";" + $existing
+}
 pytest -q backend/tests
 
 # Frontend
