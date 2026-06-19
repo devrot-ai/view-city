@@ -38,6 +38,21 @@ def create_routes(engine, policy_engine, advisor):
         """Get current aggregate metrics snapshot."""
         return engine.get_metrics()
 
+    @router.get("/health")
+    async def health():
+        """Liveness/health endpoint returning basic runtime metrics."""
+        try:
+            metrics = engine.get_metrics()
+            return {
+                "status": "ok",
+                "tick": metrics.get("tick", 0),
+                "is_running": metrics.get("is_running", False),
+                "sim_time": metrics.get("sim_time", 0.0),
+                "active_vehicles": metrics.get("total_vehicles", 0),
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     @router.get("/policies/available")
     async def get_available_policies():
         """List all available policy types with descriptions."""
