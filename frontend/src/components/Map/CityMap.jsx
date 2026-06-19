@@ -510,7 +510,28 @@ function CityMap({
     const canvas = canvasRef.current;
     if (!canvas || !cityData || !mapRef.current) return;
 
-    const ctx = canvas.getContext('2d');
+    // Guard against test environments where canvas 2D context is not implemented.
+    const nativeGetContext = canvas.getContext && canvas.getContext.bind(canvas);
+    const ctx = (typeof nativeGetContext === 'function' ? nativeGetContext('2d') : null) || {
+      resetTransform: () => {},
+      scale: () => {},
+      clearRect: () => {},
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      arc: () => {},
+      fill: () => {},
+      stroke: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      translate: () => {},
+      rotate: () => {},
+      fillText: () => {},
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      measureText: () => ({ width: 0 }),
+      putImageData: () => {},
+      setTransform: () => {},
+    };
     let animationFrameId;
 
     const render = () => {
