@@ -22,6 +22,8 @@ from app.ai.interfaces import TrafficAdvisor
 from app.api.routes import create_routes
 from app.api.websocket import websocket_endpoint, manager
 from app.config import settings
+from app.simulation.worker import start_worker
+import asyncio
 
 # Configure structured logging for the application
 logger = logging.getLogger("citysim")
@@ -54,6 +56,11 @@ engine = SimulationEngine(grid_size=settings.grid_size)
 policy_engine = PolicyEngine(engine.city)
 advisor = TrafficAdvisor(engine.city)
 
+# Optional worker process and queue (populated when settings.use_sim_worker is True)
+_worker_proc = None
+_worker_queue = None
+_latest_snapshot = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,10 +73,54 @@ async def lifespan(app: FastAPI):
     logger.info("   Roads: %d", len(engine.city.road_segments))
     logger.info("   Zones: %d", len(engine.city.zones))
 
+    # Optionally start simulation worker and forward its deltas to clients
+    if settings.use_sim_worker:
+        try:
+            global _worker_proc, _worker_queue
+            _worker_proc, _worker_queue = start_worker(grid_size=settings.grid_size)
+            logger.info("Started simulation worker pid=%s", getattr(_worker_proc, 'pid', None))
+
+            async def _forward_worker_queue():
+                loop = asyncio.get_running_loop()
+                # Continually read from the blocking multiprocessing.Queue using a threadpool
+                while _worker_proc.is_alive():
+                    try:
+                        delta = await loop.run_in_executor(None, _worker_queue.get)
+                        try:
+                            await manager.broadcast(delta)
+                        except Exception:
+                            pass
+                    except Exception:
+                        await asyncio.sleep(0.01)
+
+                # Drain any remaining items
+                while _worker_queue and not _worker_queue.empty():
+                    try:
+                        delta = _worker_queue.get_nowait()
+                        try:
+                            await manager.broadcast(delta)
+                        except Exception:
+                            pass
+                    except Exception:
+                        break
+
+            asyncio.create_task(_forward_worker_queue())
+        except Exception:
+            logger.exception("Failed to start simulation worker")
+
     yield
 
     # Teardown
+    # Stop main engine if running
     await engine.stop()
+
+    # If a worker process was started, terminate it
+    try:
+        if _worker_proc is not None:
+            _worker_proc.terminate()
+            _worker_proc.join(timeout=2.0)
+    except Exception:
+        pass
     logger.info("[Stop] Simulation stopped")
 
 
