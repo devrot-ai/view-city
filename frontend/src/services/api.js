@@ -109,7 +109,14 @@ export class SimulationWebSocket {
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        this.onMessage?.(data);
+        if (data && data.type === 'batch' && Array.isArray(data.messages)) {
+          // Dispatch each message in the batch to the handler
+          data.messages.forEach((m) => {
+            try { this.onMessage?.(m); } catch (e) { /* ignore handler errors */ }
+          });
+        } else {
+          this.onMessage?.(data);
+        }
       } catch (e) {
         console.warn('Failed to parse WebSocket message:', e);
       }
