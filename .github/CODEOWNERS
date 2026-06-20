@@ -1,13 +1,21 @@
 # CODEOWNERS for repo: view-city
+
 # Replace `@REPO_OWNER` below with your GitHub username, org, or team.
+
 # Examples:
-#  - Single user:  `* @your-username`
-#  - Org team:     `* @org/team-name`
+
+# - Single user: `* @your-username`
+
+# - Org team: `* @org/team-name`
+
 # See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
 # Default: require review from repository owners for all paths.
-* @REPO_OWNER
+
+- @REPO_OWNER
 
 # Optionally scope ownership by path:
+
 # /frontend/ @frontend-team
-# /backend/  @backend-team
+
+# /backend/ @backend-team
