@@ -131,6 +131,8 @@ function CityMap({
 }) {
   const mapContainerRef = useRef(null);
   const canvasRef = useRef(null);
+  const bgCanvasRef = useRef(null);
+  const fgCanvasRef = useRef(null);
   
   const [mapsLoaded, setMapsLoaded] = useState(false);
   const [hoveredEntity, setHoveredEntity] = useState(null);
@@ -150,6 +152,12 @@ function CityMap({
   const hasRoutesRef = useRef(false);
 
   const animTimeRef = useRef(0);
+
+  // Precomputed node/edge lookup to avoid rebuilding per-frame
+  const nodeMapRef = useRef(null);
+  const edgesListRef = useRef(null);
+  const lastRenderRef = useRef(0);
+  const MAX_FPS = 30;
 
   // Sync refs to avoid stale closures in event listeners
   const modeRef = useRef(mode);
@@ -248,6 +256,26 @@ function CityMap({
     findEntityAtLatLngRef.current = findEntityAtLatLng;
   }, [findEntityAtLatLng]);
 
+  // Precompute nodeMap and edges list when cityData or dynamic state changes.
+  useEffect(() => {
+    if (!cityData) {
+      nodeMapRef.current = null;
+      edgesListRef.current = null;
+      return;
+    }
+
+    const nm = {};
+    for (const n of cityData.nodes.features) {
+      nm[n.properties.id] = {
+        coords: n.geometry.coordinates,
+        props: { ...n.properties, ...(nodesState[n.properties.id] || {}) },
+      };
+    }
+
+    nodeMapRef.current = nm;
+    edgesListRef.current = cityData.edges.features;
+  }, [cityData, edgesState, nodesState]);
+
   // 3. Initialize Map Instance
   useEffect(() => {
     if (!mapsLoaded || !mapContainerRef.current || mapRef.current) return;
@@ -283,14 +311,27 @@ function CityMap({
       setZoomLevel(googleMap.getZoom());
     });
 
-    // Create Canvas Overlay
-    const canvas = document.createElement('canvas');
-    canvasRef.current = canvas;
+    // Create Canvas Overlay (two layers: background + foreground)
+    const bgCanvas = document.createElement('canvas');
+    const fgCanvas = document.createElement('canvas');
+    bgCanvasRef.current = bgCanvas;
+    fgCanvasRef.current = fgCanvas;
 
     class CanvasOverlay extends window.google.maps.OverlayView {
       onAdd() {
         const pane = this.getPanes().overlayLayer;
-        pane.appendChild(canvas);
+
+        bgCanvas.style.position = 'absolute';
+        bgCanvas.style.top = '0';
+        bgCanvas.style.left = '0';
+        bgCanvas.style.pointerEvents = 'none';
+        pane.appendChild(bgCanvas);
+
+        fgCanvas.style.position = 'absolute';
+        fgCanvas.style.top = '0';
+        fgCanvas.style.left = '0';
+        fgCanvas.style.pointerEvents = 'none';
+        pane.appendChild(fgCanvas);
       }
 
       draw() {
@@ -303,18 +344,24 @@ function CityMap({
         const width = mapDiv.offsetWidth;
         const height = mapDiv.offsetHeight;
 
-        canvas.style.width = width + 'px';
-        canvas.style.height = height + 'px';
-        canvas.style.position = 'absolute';
-        canvas.style.top = '0';
-        canvas.style.left = '0';
-        canvas.style.pointerEvents = 'none';
+        [bgCanvas, fgCanvas].forEach((c) => {
+          c.style.width = width + 'px';
+          c.style.height = height + 'px';
+          c.style.position = 'absolute';
+          c.style.top = '0';
+          c.style.left = '0';
+          c.style.pointerEvents = 'none';
+          const dpr = window.devicePixelRatio || 1;
+          if (c.width !== width * dpr || c.height !== height * dpr) {
+            c.width = width * dpr;
+            c.height = height * dpr;
+          }
+        });
       }
 
       onRemove() {
-        if (canvas.parentNode) {
-          canvas.parentNode.removeChild(canvas);
-        }
+        if (bgCanvas.parentNode) bgCanvas.parentNode.removeChild(bgCanvas);
+        if (fgCanvas.parentNode) fgCanvas.parentNode.removeChild(fgCanvas);
       }
     }
 
@@ -507,14 +554,14 @@ function CityMap({
 
   // 4. Drawing and animation loop (Simulation Mode Only)
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !cityData || !mapRef.current) return;
+    const bg = bgCanvasRef.current;
+    const fg = fgCanvasRef.current;
+    if (!bg || !fg || !cityData || !mapRef.current) return;
 
-    // Guard against test environments where canvas 2D context is not implemented.
-    const nativeGetContext = canvas.getContext && canvas.getContext.bind(canvas);
-    const ctx = (typeof nativeGetContext === 'function' ? nativeGetContext('2d') : null) || {
-      resetTransform: () => {},
-      scale: () => {},
+    const nativeGetContextFg = fg.getContext && fg.getContext.bind(fg);
+    const nativeGetContextBg = bg.getContext && bg.getContext.bind(bg);
+
+    const ctxFg = (typeof nativeGetContextFg === 'function' ? nativeGetContextFg('2d') : null) || {
       clearRect: () => {},
       save: () => {},
       restore: () => {},
@@ -531,18 +578,80 @@ function CityMap({
       measureText: () => ({ width: 0 }),
       putImageData: () => {},
       setTransform: () => {},
+      resetTransform: () => {},
+      scale: () => {},
     };
+
+    const ctxBg = (typeof nativeGetContextBg === 'function' ? nativeGetContextBg('2d') : null) || ctxFg;
+
     let animationFrameId;
 
-    const render = () => {
-      if (mode !== 'simulation') {
-        // Clear canvas once when switching out of simulation
+    const renderBackground = () => {
+      try {
+        const mapDiv = mapRef.current.getDiv();
+        const width = mapDiv.offsetWidth;
+        const height = mapDiv.offsetHeight;
         const dpr = window.devicePixelRatio || 1;
-        const width = canvas.width / dpr;
-        const height = canvas.height / dpr;
-        ctx.resetTransform();
-        ctx.scale(dpr, dpr);
-        ctx.clearRect(0, 0, width, height);
+        const w = width * dpr;
+        const h = height * dpr;
+        if (bg.width !== w || bg.height !== h) {
+          bg.width = w;
+          bg.height = h;
+        }
+        ctxBg.resetTransform && ctxBg.resetTransform();
+        ctxBg.scale && ctxBg.scale(dpr, dpr);
+        ctxBg.clearRect(0, 0, width, height);
+
+        const zoom = mapRef.current.getZoom();
+        const scaleFactor = Math.pow(2, zoom - 15.5);
+
+        // Draw base road geometry
+        const nm = nodeMapRef.current || {};
+        (edgesListRef.current || []).forEach((edge) => {
+          const fromNode = nm[edge.properties.from];
+          const toNode = nm[edge.properties.to];
+          if (!fromNode || !toNode) return;
+          const [ax, ay] = project(fromNode.coords[0], fromNode.coords[1]);
+          const [bx, by] = project(toNode.coords[0], toNode.coords[1]);
+          ctxBg.strokeStyle = '#1f2937';
+          ctxBg.lineWidth = 1.0 * scaleFactor;
+          ctxBg.beginPath();
+          ctxBg.moveTo(ax, ay);
+          ctxBg.lineTo(bx, by);
+          ctxBg.stroke();
+        });
+
+        // Draw base nodes
+        Object.values(nm).forEach((n) => {
+          const [x, y] = project(n.coords[0], n.coords[1]);
+          ctxBg.fillStyle = '#94a3b8';
+          ctxBg.beginPath();
+          ctxBg.arc(x, y, 2 * scaleFactor, 0, Math.PI * 2);
+          ctxBg.fill();
+        });
+      } catch (e) {
+        // Ignore background render errors
+      }
+    };
+
+    const render = () => {
+      // Throttle rendering to MAX_FPS
+      const nowMs = (performance && performance.now ? performance.now() : Date.now());
+      const minInterval = 1000 / MAX_FPS;
+      if (nowMs - lastRenderRef.current < minInterval) {
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
+      lastRenderRef.current = nowMs;
+
+      if (mode !== 'simulation') {
+        // Clear foreground once when switching out of simulation
+        const dpr = window.devicePixelRatio || 1;
+        const width = fg.width / dpr;
+        const height = fg.height / dpr;
+        ctxFg.resetTransform && ctxFg.resetTransform();
+        ctxFg.scale && ctxFg.scale(dpr, dpr);
+        ctxFg.clearRect && ctxFg.clearRect(0, 0, width, height);
         return; // Exit loop completely to avoid forced reflow
       }
 
@@ -553,221 +662,20 @@ function CityMap({
       const height = mapDiv.offsetHeight;
 
       const dpr = window.devicePixelRatio || 1;
-      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
+      if (fg.width !== width * dpr || fg.height !== height * dpr) {
+        fg.width = width * dpr;
+        fg.height = height * dpr;
       }
-      
-      ctx.resetTransform();
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, width, height);
+
+      ctxFg.resetTransform && ctxFg.resetTransform();
+      ctxFg.scale && ctxFg.scale(dpr, dpr);
+      ctxFg.clearRect && ctxFg.clearRect(0, 0, width, height);
 
       const zoom = mapRef.current.getZoom();
       const scaleFactor = Math.pow(2, zoom - 15.5);
 
-      // Build Node lookup
-      const nodeMap = {};
-      for (const n of cityData.nodes.features) {
-        nodeMap[n.properties.id] = {
-          coords: n.geometry.coordinates,
-          props: { ...n.properties, ...(nodesState[n.properties.id] || {}) }
-        };
-      }
-
-      // === DRAW POLLUTION HEATMAP LAYER (Radial Gradients) ===
-      if (layerVisibility.pollution) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'screen';
-        for (const nid in nodeMap) {
-          const node = nodeMap[nid];
-          const [lng, lat] = node.coords;
-          const [x, y] = project(lng, lat);
-          
-          const pollutionVal = node.props.pollution || 0;
-          if (pollutionVal > 2) {
-            const rad = (30 + pollutionVal * 0.7) * scaleFactor;
-            const grad = ctx.createRadialGradient(x, y, 0, x, y, rad);
-            
-            const opacity = 0.25 * Math.min(1, pollutionVal / 50);
-            
-            let colorStops = [
-              [0, `rgba(239, 68, 68, ${opacity})`],
-              [0.3, `rgba(245, 158, 11, ${opacity * 0.6})`],
-              [0.6, `rgba(139, 92, 246, ${opacity * 0.3})`],
-              [1, 'rgba(0, 0, 0, 0)']
-            ];
-            
-            for (const [stop, col] of colorStops) {
-              grad.addColorStop(stop, col);
-            }
-            
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(x, y, rad, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-        ctx.restore();
-      }
-
-      // === DRAW NOISE RIPPLES ===
-      if (layerVisibility.noise) {
-        ctx.save();
-        for (const nid in nodeMap) {
-          const node = nodeMap[nid];
-          const [lng, lat] = node.coords;
-          const [x, y] = project(lng, lat);
-          
-          const noiseVal = node.props.noise || 0;
-          if (noiseVal > 30) {
-            const maxRad = (15 + noiseVal * 0.45) * scaleFactor;
-            const speed = 0.8;
-            const t = (animTimeRef.current * speed) % 1.0;
-            
-            ctx.strokeStyle = `rgba(217, 70, 239, ${0.45 * (1 - t) * (noiseVal / 100)})`;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(x, y, maxRad * t, 0, Math.PI * 2);
-            ctx.stroke();
-
-            ctx.fillStyle = `rgba(217, 70, 239, ${0.05 * (noiseVal / 100)})`;
-            ctx.beginPath();
-            ctx.arc(x, y, maxRad * t * 0.7, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-        ctx.restore();
-      }
-
-      // === DRAW ROADS (TRAFFIC SEGMENTS) ===
-      if (layerVisibility.traffic) {
-        cityData.edges.features.forEach((edge) => {
-          const fromNode = nodeMap[edge.properties.from];
-          const toNode = nodeMap[edge.properties.to];
-          if (!fromNode || !toNode) return;
-
-          const [fx, fy] = project(fromNode.coords[0], fromNode.coords[1]);
-          const [tx, ty] = project(toNode.coords[0], toNode.coords[1]);
-
-          const dx = tx - fx;
-          const dy = ty - fy;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          if (len === 0) return;
-
-          const nx = dx / len;
-          const ny = dy / len;
-          
-          const offsetDist = Math.max(1.2, 2.5 * scaleFactor); 
-          const ox = ny * offsetDist;
-          const oy = -nx * offsetDist;
-
-          const sfx = fx + ox;
-          const sfy = fy + oy;
-          const stx = tx + ox;
-          const sty = ty + oy;
-
-          const dynamicEdge = edgesState[edge.properties.id] || {};
-          const isClosed = dynamicEdge.is_closed !== undefined ? dynamicEdge.is_closed : edge.properties.is_closed;
-          const congestion = dynamicEdge.congestion !== undefined ? dynamicEdge.congestion : edge.properties.congestion;
-          const roadType = edge.properties.road_type || 'local';
-
-          let lineWidth = 1.8 * scaleFactor;
-          if (roadType === 'highway') lineWidth = 4 * scaleFactor;
-          else if (roadType === 'main') lineWidth = 2.8 * scaleFactor;
-
-          const isHovered = hoveredEntity?.type === 'edge' && hoveredEntity.id === edge.properties.id;
-          const isClicked = clickedEntity?.type === 'edge' && clickedEntity.id === edge.properties.id;
-
-          // Road Casing
-          ctx.strokeStyle = isHovered || isClicked ? 'rgba(167, 139, 250, 0.7)' : '#070a14';
-          ctx.lineWidth = lineWidth + (1.2 * scaleFactor);
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(sfx, sfy);
-          ctx.lineTo(stx, sty);
-          ctx.stroke();
-
-          // Road Fill
-          if (isClosed) {
-            ctx.strokeStyle = '#374151';
-          } else {
-            let roadColor = '#10b981';
-            if (congestion > 0.8) roadColor = '#ef4444';
-            else if (congestion > 0.6) roadColor = '#f97316';
-            else if (congestion > 0.4) roadColor = '#f59e0b';
-            else if (congestion > 0.2) roadColor = '#84cc16';
-            
-            ctx.strokeStyle = roadColor;
-          }
-
-          ctx.lineWidth = lineWidth;
-          ctx.beginPath();
-          ctx.moveTo(sfx, sfy);
-          ctx.lineTo(stx, sty);
-          ctx.stroke();
-
-          // Tiny directional arrows
-          if (zoom > 14 && !isClosed) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
-            const arrowSpacing = 70 * scaleFactor;
-            const numArrows = Math.max(1, Math.floor(len / arrowSpacing));
-            
-            for (let i = 1; i <= numArrows; i++) {
-              const fraction = i / (numArrows + 1);
-              const ax = sfx + dx * fraction;
-              const ay = sfy + dy * fraction;
-
-              ctx.save();
-              ctx.translate(ax, ay);
-              ctx.rotate(Math.atan2(dy, dx));
-              ctx.beginPath();
-              ctx.moveTo(-2.5 * scaleFactor, -1.8 * scaleFactor);
-              ctx.lineTo(1 * scaleFactor, 0);
-              ctx.lineTo(-2.5 * scaleFactor, 1.8 * scaleFactor);
-              ctx.fill();
-              ctx.restore();
-            }
-          }
-        });
-      }
-
-      // === DRAW INTERSECTIONS (TRAFFIC SIGNALS) ===
-      cityData.nodes.features.forEach((node) => {
-        const [lng, lat] = node.geometry.coordinates;
-        const [x, y] = project(lng, lat);
-
-        const dynamicNode = nodesState[node.properties.id] || {};
-        const signal = dynamicNode.signal || node.properties.signal || 'green';
-
-        let sigColor = '#22c55e';
-        if (signal === 'yellow') sigColor = '#eab308';
-        else if (signal === 'red') sigColor = '#ef4444';
-
-        const isHovered = hoveredEntity?.type === 'node' && hoveredEntity.id === node.properties.id;
-        const isClicked = clickedEntity?.type === 'node' && clickedEntity.id === node.properties.id;
-
-        if (isHovered || isClicked) {
-          ctx.shadowBlur = 12;
-          ctx.shadowColor = sigColor;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-          ctx.beginPath();
-          ctx.arc(x, y, 6.5 * scaleFactor, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-        }
-
-        ctx.fillStyle = '#0a0e1a';
-        ctx.beginPath();
-        ctx.arc(x, y, 4.8 * scaleFactor, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = sigColor;
-        ctx.beginPath();
-        ctx.arc(x, y, 3.5 * scaleFactor, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // === DRAW VEHICLES ===
+      // Draw vehicles on foreground
+      const nodeMap = nodeMapRef.current || {};
       vehicles.forEach((v) => {
         const fromNode = nodeMap[v.edge_from];
         const toNode = nodeMap[v.edge_to];
@@ -783,8 +691,7 @@ function CityMap({
 
         const nx = dx / len;
         const ny = dy / len;
-        
-        const offsetDist = Math.max(1.2, 2.5 * scaleFactor); 
+        const offsetDist = Math.max(1.2, 2.5 * scaleFactor);
         const ox = ny * offsetDist;
         const oy = -nx * offsetDist;
 
@@ -799,7 +706,7 @@ function CityMap({
 
         let vColor = '#a78bfa';
         let radius = 2.5 * scaleFactor;
-        
+
         if (v.type === 'bus') {
           vColor = '#f59e0b';
           radius = 3.6 * scaleFactor;
@@ -813,72 +720,46 @@ function CityMap({
 
         if (v.honking) {
           const honkPulse = (1.5 + Math.sin(animTimeRef.current * 3.5)) * 3 * scaleFactor;
-          ctx.strokeStyle = 'rgba(244, 63, 94, 0.45)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.arc(vx, vy, radius + honkPulse, 0, Math.PI * 2);
-          ctx.stroke();
+          ctxFg.strokeStyle = 'rgba(244, 63, 94, 0.45)';
+          ctxFg.lineWidth = 1;
+          ctxFg.beginPath();
+          ctxFg.arc(vx, vy, radius + honkPulse, 0, Math.PI * 2);
+          ctxFg.stroke();
         }
 
-        ctx.fillStyle = vColor;
-        ctx.beginPath();
-        ctx.arc(vx, vy, radius, 0, Math.PI * 2);
-        ctx.fill();
+        ctxFg.fillStyle = vColor;
+        ctxFg.beginPath();
+        ctxFg.arc(vx, vy, radius, 0, Math.PI * 2);
+        ctxFg.fill();
 
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 0.5 * scaleFactor;
-        ctx.beginPath();
-        ctx.arc(vx, vy, radius, 0, Math.PI * 2);
-        ctx.stroke();
+        ctxFg.strokeStyle = '#ffffff';
+        ctxFg.lineWidth = 0.5 * scaleFactor;
+        ctxFg.beginPath();
+        ctxFg.arc(vx, vy, radius, 0, Math.PI * 2);
+        ctxFg.stroke();
       });
 
-      // === DRAW ACCIDENTS ===
-      if (layerVisibility.accidents) {
-        accidents.forEach((a) => {
-          const fromNode = nodeMap[a.from_node];
-          const toNode = nodeMap[a.to_node];
-          if (!fromNode || !toNode) return;
-
-          const [ax, ay] = project(fromNode.coords[0], fromNode.coords[1]);
-          const [bx, by] = project(toNode.coords[0], toNode.coords[1]);
-
-          const mx = (ax + bx) / 2;
-          const my = (ay + by) / 2;
-
-          const pulse = (1.2 + Math.sin(animTimeRef.current * 1.5)) * 0.5;
-          const maxRad = (8 + (a.severity || 0.5) * 10) * scaleFactor * pulse;
-
-          ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
-          ctx.beginPath();
-          ctx.arc(mx, my, maxRad, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.45)';
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.arc(mx, my, maxRad * 0.7, 0, Math.PI * 2);
-          ctx.stroke();
-
-          ctx.fillStyle = '#ef4444';
-          ctx.beginPath();
-          const r = 5 * scaleFactor;
-          ctx.moveTo(mx, my - r);
-          ctx.lineTo(mx - r, my + r);
-          ctx.lineTo(mx + r, my + r);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.fillStyle = '#ffffff';
-          ctx.font = `bold ${7 * scaleFactor}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('!', mx, my + r * 0.45);
-        });
-      }
+      // Draw accidents as pulses
+      accidents.forEach((a) => {
+        const fromNode = nodeMap[a.from_node];
+        const toNode = nodeMap[a.to_node];
+        if (!fromNode || !toNode) return;
+        const [ax, ay] = project(fromNode.coords[0], fromNode.coords[1]);
+        const [bx, by] = project(toNode.coords[0], toNode.coords[1]);
+        const mx = (ax + bx) / 2;
+        const my = (ay + by) / 2;
+        const pulse = (1.2 + Math.sin(animTimeRef.current * 1.5)) * 0.5;
+        const maxRad = (8 + (a.severity || 0.5) * 10) * scaleFactor * pulse;
+        ctxFg.fillStyle = 'rgba(239, 68, 68, 0.2)';
+        ctxFg.beginPath();
+        ctxFg.arc(mx, my, maxRad, 0, Math.PI * 2);
+        ctxFg.fill();
+      });
 
       animationFrameId = requestAnimationFrame(render);
     };
 
+    renderBackground();
     render();
 
     return () => {
