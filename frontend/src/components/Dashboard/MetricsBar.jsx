@@ -3,7 +3,6 @@
  * Displays key simulation metrics with animated counters and icons.
  */
 
-import React from 'react';
 import AnimatedCounter from '../UI/AnimatedCounter';
 
 export default function MetricsBar({ metrics, performance: perf }) {

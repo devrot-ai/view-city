@@ -2,7 +2,7 @@
  * GlassCard — Reusable glassmorphism card component.
  */
 
-import React from 'react';
+import React from 'react'; // eslint-disable-line no-unused-vars
 
 export default function GlassCard({ title, icon, children, className = '' }) {
   return (

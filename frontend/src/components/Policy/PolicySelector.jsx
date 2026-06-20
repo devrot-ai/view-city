@@ -2,7 +2,7 @@
  * PolicySelector — Policy selection, zone targeting, and application panel.
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import GlassCard from '../UI/GlassCard';
 import ImpactPreview from './ImpactPreview';
 import api from '../../services/api';

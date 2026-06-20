@@ -2,7 +2,6 @@
  * ControlPanel — Right sidebar with simulation controls, layer toggles, and policies.
  */
 
-import React from 'react';
 import GlassCard from '../UI/GlassCard';
 import SimulationClock from './SimulationClock';
 
@@ -18,7 +17,6 @@ export default function ControlPanel({
   onSpeedChange,
   layerVisibility,
   onToggleLayer,
-  connectionStatus,
 }) {
   return (
     <div className="control-panel animate-slide-right" id="control-panel">

@@ -2,7 +2,7 @@
  * SimulationClock — Shows simulation time and tick count.
  */
 
-import React from 'react';
+// React default import not required for modern JSX runtime
 
 export default function SimulationClock({ tick, simTime }) {
   // Convert simTime (seconds) to mm:ss format

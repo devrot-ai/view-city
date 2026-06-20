@@ -5,7 +5,7 @@
  * of alternative routes with AI scoring, traffic warnings, and navigation steps.
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react'; // eslint-disable-line no-unused-vars
 import GlassCard from '../UI/GlassCard';
 
 export default function RouteOptimizerPanel({
@@ -29,21 +29,24 @@ export default function RouteOptimizerPanel({
       return;
     }
 
+    const originEl = originInputRef.current;
+    const destEl = destinationInputRef.current;
+
     const options = {
       componentRestrictions: { country: 'in' }, // Focus on India
       fields: ['geometry', 'name', 'formatted_address'],
     };
 
-    const originAutocomplete = new window.google.maps.places.Autocomplete(originInputRef.current, options);
-    originAutocomplete.addListener('place_changed', () => {
+    const originAutocomplete = new window.google.maps.places.Autocomplete(originEl, options);
+    const originListener = originAutocomplete.addListener('place_changed', () => {
       const place = originAutocomplete.getPlace();
       if (place.geometry) {
         onOriginSelected(place.name || place.formatted_address, place.geometry.location);
       }
     });
 
-    const destAutocomplete = new window.google.maps.places.Autocomplete(destinationInputRef.current, options);
-    destAutocomplete.addListener('place_changed', () => {
+    const destAutocomplete = new window.google.maps.places.Autocomplete(destEl, options);
+    const destListener = destAutocomplete.addListener('place_changed', () => {
       const place = destAutocomplete.getPlace();
       if (place.geometry) {
         onDestinationSelected(place.name || place.formatted_address, place.geometry.location);
@@ -54,14 +57,26 @@ export default function RouteOptimizerPanel({
     const preventSubmit = (e) => {
       if (e.key === 'Enter') e.preventDefault();
     };
-    originInputRef.current?.addEventListener('keydown', preventSubmit);
-    destinationInputRef.current?.addEventListener('keydown', preventSubmit);
+    originEl?.addEventListener('keydown', preventSubmit);
+    destEl?.addEventListener('keydown', preventSubmit);
 
     return () => {
-      originInputRef.current?.removeEventListener('keydown', preventSubmit);
-      destinationInputRef.current?.removeEventListener('keydown', preventSubmit);
+      originEl?.removeEventListener('keydown', preventSubmit);
+      destEl?.removeEventListener('keydown', preventSubmit);
+
+      // remove map listeners if possible
+      try {
+        if (originListener && window.google && window.google.maps && window.google.maps.event) {
+          window.google.maps.event.removeListener(originListener);
+        }
+        if (destListener && window.google && window.google.maps && window.google.maps.event) {
+          window.google.maps.event.removeListener(destListener);
+        }
+      } catch {
+        // best-effort cleanup
+      }
     };
-  }, [googleMapsLoaded]);
+  }, [googleMapsLoaded, onOriginSelected, onDestinationSelected]);
 
   // Sync inputs with state (e.g., when clicking points on the map)
   useEffect(() => {

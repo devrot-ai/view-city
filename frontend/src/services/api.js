@@ -93,7 +93,8 @@ export class SimulationWebSocket {
 
     try {
       this.ws = new WebSocket(wsUrl);
-    } catch (e) {
+    } catch (err) {
+      console.warn('WebSocket connection error', err);
       this.onStatusChange?.('disconnected');
       this._scheduleReconnect();
       return;

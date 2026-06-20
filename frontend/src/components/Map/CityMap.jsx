@@ -6,8 +6,11 @@
  * 2. 'routing': India-wide AI Route Optimization using Directions Service and Autocomplete.
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import api from '../../services/api';
+import { getGeoDistance, distanceToSegmentGeo } from '../../utils/geo';
+
+const Fragment = React.Fragment;
 
 // Custom dark map style for Google Maps to match cyberpunk aesthetics
 const darkMapStyle = [
@@ -153,9 +156,15 @@ function CityMap({
   const originRef = useRef(origin);
   const destinationRef = useRef(destination);
 
+  // Keep stable refs for callback props to avoid reattaching map listeners
+  const onOriginSelectedRef = useRef(onOriginSelected);
+  const onDestinationSelectedRef = useRef(onDestinationSelected);
+
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { originRef.current = origin; }, [origin]);
   useEffect(() => { destinationRef.current = destination; }, [destination]);
+  useEffect(() => { onOriginSelectedRef.current = onOriginSelected; }, [onOriginSelected]);
+  useEffect(() => { onDestinationSelectedRef.current = onDestinationSelected; }, [onDestinationSelected]);
 
   // 1. Load Google Maps API Script
   useEffect(() => {
@@ -167,6 +176,7 @@ function CityMap({
       .catch((e) => {
         console.error('Failed to load Google Maps API:', e);
       });
+     
   }, []);
 
   // Auto-dismiss Google Maps warning dialog for developer/local fallback mode
@@ -178,41 +188,16 @@ function CityMap({
       }
     }, 1000);
     return () => clearInterval(interval);
+    // this is intentionally no deps because it operates on document global
+     
   }, []);
 
 
-  // 2. Compute geographic distance for mouse collision check
-  const getGeoDistance = (lat1, lng1, lat2, lng2) => {
-    const dy = lat1 - lat2;
-    const dx = (lng1 - lng2) * Math.cos(28.63 * Math.PI / 180);
-    return Math.sqrt(dx * dx + dy * dy);
-  };
+  // 2. Geographic helpers are provided by src/utils/geo so they can be unit tested
 
-  // Find nearest segment from point to line in lat/lng degrees space
-  const distanceToSegmentGeo = (px, py, ax, ay, bx, by) => {
-    const cosLat = Math.cos(28.63 * Math.PI / 180);
-    const pax = (py - ay) * cosLat;
-    const pay = px - ax;
-    const bax = (by - ay) * cosLat;
-    const bay = bx - ax;
-
-    const lenSq = bax * bax + bay * bay;
-    if (lenSq === 0) return Math.sqrt(pax * pax + pay * pay);
-
-    let t = (pax * bax + pay * bay) / lenSq;
-    t = Math.max(0, Math.min(1, t));
-
-    const projX = ax + t * (bx - ax);
-    const projY = ay + t * (by - ay);
-
-    const dx = (py - projY) * cosLat;
-    const dy = px - projX;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-
-  const findEntityAtLatLng = (lat, lng) => {
+  const findEntityAtLatLng = useCallback((lat, lng) => {
     if (!cityData) return null;
-    
+
     const toleranceDegrees = 0.00028 / Math.max(0.2, (zoomLevel - 13));
 
     for (const node of cityData.nodes.features) {
@@ -254,7 +239,14 @@ function CityMap({
     }
 
     return nearestEdge;
-  };
+  }, [cityData, edgesState, nodesState, zoomLevel]);
+
+  // Keep a ref of the finder function so long-lived map listeners don't capture
+  // a stale closure and to satisfy eslint's exhaustive-deps rules.
+  const findEntityAtLatLngRef = useRef(findEntityAtLatLng);
+  useEffect(() => {
+    findEntityAtLatLngRef.current = findEntityAtLatLng;
+  }, [findEntityAtLatLng]);
 
   // 3. Initialize Map Instance
   useEffect(() => {
@@ -330,25 +322,25 @@ function CityMap({
     overlay.setMap(googleMap);
     overlayRef.current = overlay;
 
-    // Click handler (Context Aware)
+    // Click handler (Context Aware) — use ref-stable finder to avoid stale closures
     googleMap.addListener('click', (e) => {
-      if (modeRef.current === 'routing') {
-        const latLng = e.latLng;
-        if (!originRef.current) {
-          onOriginSelected(`Point A (${latLng.lat().toFixed(4)}, ${latLng.lng().toFixed(4)})`, latLng);
-        } else if (!destinationRef.current) {
-          onDestinationSelected(`Point B (${latLng.lat().toFixed(4)}, ${latLng.lng().toFixed(4)})`, latLng);
+        if (modeRef.current === 'routing') {
+          const latLng = e.latLng;
+          if (!originRef.current) {
+            onOriginSelectedRef.current(`Point A (${latLng.lat().toFixed(4)}, ${latLng.lng().toFixed(4)})`, latLng);
+          } else if (!destinationRef.current) {
+            onDestinationSelectedRef.current(`Point B (${latLng.lat().toFixed(4)}, ${latLng.lng().toFixed(4)})`, latLng);
+          }
+        } else {
+          const clicked = findEntityAtLatLngRef.current(e.latLng.lat(), e.latLng.lng());
+          setClickedEntity(clicked);
         }
-      } else {
-        const clicked = findEntityAtLatLng(e.latLng.lat(), e.latLng.lng());
-        setClickedEntity(clicked);
-      }
     });
 
-    // Hover handler
+    // Hover handler (use ref-stable finder)
     googleMap.addListener('mousemove', (e) => {
       if (modeRef.current === 'simulation') {
-        const hovered = findEntityAtLatLng(e.latLng.lat(), e.latLng.lng());
+        const hovered = findEntityAtLatLngRef.current(e.latLng.lat(), e.latLng.lng());
         setHoveredEntity(hovered);
       } else {
         setHoveredEntity(null);
@@ -363,7 +355,7 @@ function CityMap({
       overlay.setMap(null);
       mapRef.current = null;
     };
-  }, [mapsLoaded, cityData]);
+  }, [mapsLoaded, cityData, onMapReady]);
 
   // Handle markers and directions rendering inside 'routing' mode
   useEffect(() => {
@@ -401,7 +393,7 @@ function CityMap({
 
         originMarkerRef.current.addListener('dragend', () => {
           const pos = originMarkerRef.current.getPosition();
-          onOriginSelected(`Point A (${pos.lat().toFixed(4)}, ${pos.lng().toFixed(4)})`, pos);
+          if (onOriginSelectedRef.current) onOriginSelectedRef.current(`Point A (${pos.lat().toFixed(4)}, ${pos.lng().toFixed(4)})`, pos);
         });
       }
     } else {
@@ -433,7 +425,7 @@ function CityMap({
 
         destinationMarkerRef.current.addListener('dragend', () => {
           const pos = destinationMarkerRef.current.getPosition();
-          onDestinationSelected(`Point B (${pos.lat().toFixed(4)}, ${pos.lng().toFixed(4)})`, pos);
+          if (onDestinationSelectedRef.current) onDestinationSelectedRef.current(`Point B (${pos.lat().toFixed(4)}, ${pos.lng().toFixed(4)})`, pos);
         });
       }
     } else {
@@ -470,7 +462,7 @@ function CityMap({
         onRoutesCalculated([]);
       }
     }
-  }, [origin, destination, mode, mapsLoaded]);
+  }, [origin, destination, mode, mapsLoaded, onRoutesCalculated, selectedRouteIndex]);
 
   // Sync selected index of active route
   useEffect(() => {
@@ -491,12 +483,55 @@ function CityMap({
     setMousePos({ x: e.clientX, y: e.clientY });
   };
 
+  // Close the floating popup
+  const handleClosePopup = () => {
+    setClickedEntity(null);
+  };
+
+  // Toggle a road closure policy for the given edge id (best-effort)
+  const handleToggleRoadClosure = async (edgeId, currentlyClosed) => {
+    try {
+      if (api && api.applyPolicy) {
+        if (currentlyClosed) {
+          await api.resetPolicies(null, null, [edgeId]);
+        } else {
+          await api.applyPolicy('CLOSE_ROAD', null, {}, [edgeId]);
+        }
+      } else {
+        console.warn('API applyPolicy/resetPolicies unavailable');
+      }
+    } catch (err) {
+      console.warn('toggleRoadClosure failed:', err);
+    }
+  };
+
   // 4. Drawing and animation loop (Simulation Mode Only)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !cityData || !mapRef.current) return;
 
-    const ctx = canvas.getContext('2d');
+    // Guard against test environments where canvas 2D context is not implemented.
+    const nativeGetContext = canvas.getContext && canvas.getContext.bind(canvas);
+    const ctx = (typeof nativeGetContext === 'function' ? nativeGetContext('2d') : null) || {
+      resetTransform: () => {},
+      scale: () => {},
+      clearRect: () => {},
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      arc: () => {},
+      fill: () => {},
+      stroke: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      translate: () => {},
+      rotate: () => {},
+      fillText: () => {},
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      measureText: () => ({ width: 0 }),
+      putImageData: () => {},
+      setTransform: () => {},
+    };
     let animationFrameId;
 
     const render = () => {
@@ -919,7 +954,7 @@ function CityMap({
           </div>
           <div className="glass-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
             {clickedEntity.type === 'node' ? (
-              <>
+              <Fragment>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>Zone:</span>
                   <strong style={{ color: 'var(--accent-violet)' }}>{clickedEntity.properties.zone}</strong>
@@ -941,9 +976,9 @@ function CityMap({
                   <span style={{ color: 'var(--text-secondary)' }}>Noise Level:</span>
                   <strong style={{ color: 'var(--accent-fuchsia)' }}>{clickedEntity.properties.noise?.toFixed(1) || 0} dB</strong>
                 </div>
-              </>
+              </Fragment>
             ) : (
-              <>
+              <Fragment>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>From → To:</span>
                   <strong>{clickedEntity.properties.from} → {clickedEntity.properties.to}</strong>
@@ -996,7 +1031,7 @@ function CityMap({
                 >
                   {clickedEntity.properties.is_closed ? '🔓 Reopen Road' : '🚧 Close Road'}
                 </button>
-              </>
+              </Fragment>
             )}
           </div>
         </div>
@@ -1041,12 +1076,8 @@ function CityMap({
     </div>
   );
 
-  function handleClosePopup() {
-    setClickedEntity(null);
-  }
 }
-
-export default React.memo(CityMap, (prevProps, nextProps) => {
+export default memo(CityMap, (prevProps, nextProps) => {
   // If mode changed, we MUST re-render
   if (prevProps.mode !== nextProps.mode) return false;
 
