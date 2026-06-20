@@ -75,6 +75,13 @@ class CityGraph:
         self.road_segments: dict[str, RoadSegment] = {}
         self.zones: dict[str, list[str]] = {}  # zone_id -> list of node_ids
         self._edge_index: dict[tuple[str, str], str] = {}  # (from, to) -> edge_id
+        # Adjacency cache for fast neighbour iteration (node -> list[(neighbor_id, RoadSegment)])
+        self._adj: dict[str, list[tuple[str, RoadSegment]]] = {}
+        # Simple in-memory cache for shortest paths to avoid repeated expensive
+        # networkx computations. Cache entries are TTL-based to tolerate
+        # dynamic congestion; this is a pragmatic trade-off for latency.
+        self._path_cache: dict[tuple[str, str], tuple[list[str], float]] = {}
+        self._path_cache_ttl: float = 2.0  # seconds
 
         self._generate_city()
 
@@ -208,6 +215,10 @@ class CityGraph:
         self.road_segments[edge_id] = segment
         self.graph.add_edge(from_id, to_id, weight=length, segment=segment)
         self._edge_index[(from_id, to_id)] = edge_id
+        # Maintain adjacency list for faster custom pathfinding
+        if from_id not in self._adj:
+            self._adj[from_id] = []
+        self._adj[from_id].append((to_id, segment))
 
     def _add_highway_shortcuts(self):
         """No-op for circular layout."""
@@ -243,7 +254,33 @@ class CityGraph:
         Find shortest path using Dijkstra, weighted by
         (length / speed_factor) to account for congestion.
         """
+        import time
+
+        # Try an external cache (Redis) first to share cached paths across
+        # worker processes. Falls back to local in-memory cache implemented
+        # earlier in this class.
         try:
+            from app.cache import get as cache_get, set as cache_set
+            cache_key = f"path:{from_id}:{to_id}"
+            cached = cache_get(cache_key)
+            if cached is not None:
+                return cached
+        except Exception:
+            cache_get = None
+            cache_set = None
+
+        # Return cached path when available in-process and fresh
+        key = (from_id, to_id)
+        now = time.time()
+        cache_entry = self._path_cache.get(key)
+        if cache_entry:
+            path, ts = cache_entry
+            if now - ts < self._path_cache_ttl:
+                return path
+        try:
+            import time as _time
+            from app.metrics import PATHFIND_TIME
+
             # Dynamic weight: penalize congested roads
             def weight_fn(u, v, data):
                 seg = data.get("segment")
@@ -256,11 +293,45 @@ class CityGraph:
                     return seg.length * penalty
                 return data.get("weight", 1.0)
 
-            return nx.shortest_path(
-                self.graph, from_id, to_id, weight=weight_fn
-            )
+            # Heuristic using haversine distance
+            def heuristic(u, v):
+                nu = self.intersections.get(u)
+                nv = self.intersections.get(v)
+                if not nu or not nv:
+                    return 0.0
+                return self._haversine(nu.lat, nu.lng, nv.lat, nv.lng)
+
+            # Try custom lightweight A* using adjacency cache to avoid networkx overhead
+            start = _time.perf_counter()
+            try:
+                path = self._a_star(from_id, to_id, weight_fn, heuristic)
+            except Exception:
+                # Fall back to networkx A* for correctness
+                try:
+                    path = nx.astar_path(self.graph, from_id, to_id, heuristic=heuristic, weight=weight_fn)
+                except Exception:
+                    path = nx.shortest_path(self.graph, from_id, to_id, weight=weight_fn)
+            finally:
+                try:
+                    PATHFIND_TIME.observe(_time.perf_counter() - start)
+                except Exception:
+                    pass
+            return path
         except nx.NetworkXNoPath:
             return []
+        finally:
+            # Store computed path in process-local cache (even empty list)
+            try:
+                computed = locals().get('path', [])
+                self._path_cache[key] = (computed, now)
+                # Also populate external cache when available
+                try:
+                    if cache_set:
+                        cache_set(cache_key, computed, ttl=self._path_cache_ttl)
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
     def congestion_factor(self, edge: RoadSegment) -> float:
         """Calculate congestion factor (0.0 = free flow, 1.0 = gridlock)."""
@@ -394,3 +465,49 @@ class CityGraph:
             + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
         )
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _a_star(self, start: str, goal: str, weight_fn, heuristic) -> list[str]:
+        """Lightweight A* implementation using adjacency cache.
+
+        This avoids some of the overhead of NetworkX for repeated pathfinding
+        on a moderately-sized graph where Python-level loops are faster.
+        Raises NetworkXNoPath on failure to find a path.
+        """
+        import heapq
+
+        if start == goal:
+            return [start]
+
+        open_heap = []
+        heapq.heappush(open_heap, (heuristic(start, goal), start))
+        came_from: dict[str, str] = {}
+        g_score: dict[str, float] = {start: 0.0}
+        closed = set()
+
+        while open_heap:
+            _, current = heapq.heappop(open_heap)
+            if current in closed:
+                continue
+            if current == goal:
+                # Reconstruct path
+                path = [current]
+                while current in came_from:
+                    current = came_from[current]
+                    path.append(current)
+                path.reverse()
+                return path
+
+            closed.add(current)
+
+            for neighbor_id, seg in self._adj.get(current, []):
+                tentative_g = g_score[current] + weight_fn(current, neighbor_id, {"segment": seg})
+                if tentative_g == float("inf"):
+                    continue
+                if neighbor_id not in g_score or tentative_g < g_score[neighbor_id]:
+                    g_score[neighbor_id] = tentative_g
+                    f = tentative_g + heuristic(neighbor_id, goal)
+                    heapq.heappush(open_heap, (f, neighbor_id))
+                    came_from[neighbor_id] = current
+
+        # No path found
+        raise nx.NetworkXNoPath(start, goal)
