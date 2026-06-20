@@ -10,7 +10,7 @@ Recommended minimal settings to secure `main`:
 
 Example `gh` API / CLI commands (replace `{owner}` and `{repo}`):
 
-1) Protect branch via the REST API (curl):
+1. Protect branch via the REST API (curl):
 
 ```bash
 curl -X PUT -H "Accept: application/vnd.github+json" \
@@ -30,7 +30,7 @@ curl -X PUT -H "Accept: application/vnd.github+json" \
   }'
 ```
 
-2) Using `gh` CLI (must be authenticated and have admin repo rights):
+2. Using `gh` CLI (must be authenticated and have admin repo rights):
 
 ```bash
 # Example: require checks and reviews (adjust contexts to your workflow names)
@@ -41,5 +41,6 @@ gh api repos/{owner}/{repo}/branches/main/protection -X PUT \
 ```
 
 Notes:
+
 - Generating a GitHub token with `repo` and `admin:repo_hook` scopes is required for the curl example.
 - `CODEOWNERS` entries will automatically require approval from listed owners when "Require review from Code Owners" is enabled in protection settings.
