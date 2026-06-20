@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     debug: bool = True
     # Enable JSON structured logging when True (overrides debug behavior if set)
     json_logging: bool = True
+    # Run simulation in a separate worker process and forward deltas
+    use_sim_worker: bool = False
 
     class Config:
         env_file = ".env"
