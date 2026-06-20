@@ -25,6 +25,7 @@ from app.simulation.traffic import TrafficSimulator
 from app.simulation.pollution import PollutionModel
 from app.simulation.noise import NoiseModel
 from app.simulation.accidents import AccidentModel
+from app.metrics import TICK_TIME
 
 
 class SimulationEngine:
@@ -140,6 +141,12 @@ class SimulationEngine:
         self._tick_durations.append(self._last_tick_duration)
         if len(self._tick_durations) > 100:
             self._tick_durations.pop(0)
+
+        # Observe tick duration for Prometheus if available
+        try:
+            TICK_TIME.observe(self._last_tick_duration)
+        except Exception:
+            pass
 
         # 8. Broadcast delta to connected clients
         if self._broadcast_fn:
