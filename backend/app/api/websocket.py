@@ -23,6 +23,9 @@ class ConnectionManager:
         self.active_connections: list[WebSocket] = []
         self._throttle_interval: float = 0.05  # 50ms = max 20 updates/sec
         self._last_broadcast_time: float = 0.0
+        # Batch buffer: accumulate deltas during throttle window
+        self._pending: list[dict] = []
+        self._flush_task: Optional[asyncio.Task] = None
 
     async def connect(self, websocket: WebSocket):
         """Accept and register a new WebSocket connection."""
@@ -41,28 +44,53 @@ class ConnectionManager:
         """
         import time
 
-        now = time.perf_counter()
-        if now - self._last_broadcast_time < self._throttle_interval:
-            return  # Skip this broadcast (too soon)
+        # Append to pending batch and schedule a flush if not already scheduled
+        self._pending.append(data)
 
-        self._last_broadcast_time = now
-
-        # Serialize once, send to all
-        try:
-            message = json.dumps(data, default=str)
-        except (TypeError, ValueError):
+        if self._flush_task is not None and not self._flush_task.done():
             return
 
-        disconnected = []
-        for connection in self.active_connections:
+        async def _flush():
             try:
-                await connection.send_text(message)
-            except Exception:
-                disconnected.append(connection)
+                await asyncio.sleep(self._throttle_interval)
 
-        # Clean up disconnected clients
-        for conn in disconnected:
-            self.disconnect(conn)
+                # Prepare batched payload
+                batch = {
+                    "type": "batch",
+                    "messages": self._pending.copy()
+                }
+
+                # Reset buffer
+                self._pending.clear()
+
+                # Serialize once, send to all. Prefer orjson when available for speed.
+                try:
+                    import orjson
+                    try:
+                        message = orjson.dumps(batch).decode('utf-8')
+                    except Exception:
+                        message = json.dumps(batch, default=str)
+                except Exception:
+                    try:
+                        message = json.dumps(batch, default=str)
+                    except (TypeError, ValueError):
+                        return
+
+                disconnected = []
+                for connection in list(self.active_connections):
+                    try:
+                        await connection.send_text(message)
+                    except Exception:
+                        disconnected.append(connection)
+
+                # Clean up disconnected clients
+                for conn in disconnected:
+                    self.disconnect(conn)
+            finally:
+                self._flush_task = None
+
+        # Schedule the flush task
+        self._flush_task = asyncio.create_task(_flush())
 
     @property
     def client_count(self) -> int:
